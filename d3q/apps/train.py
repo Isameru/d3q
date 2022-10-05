@@ -11,6 +11,7 @@
 #                               8P'
 #                               "
 
+import os
 import warnings
 
 with warnings.catch_warnings():
@@ -19,11 +20,24 @@ with warnings.catch_warnings():
     except ModuleNotFoundError:
         pass
 
-from d3q.logging import DEFAULT_LOG_LEVEL, configure_logger, log
-from d3q.qlearn import QTrainer
-from d3q.replaymemory import ReplayMemory
-from d3q.simfarm import SimFarm
-from d3q.util import DEFAULT_GAME, make_game
+import atexit
+
+from d3q.core.logging import DEFAULT_LOG_LEVEL, configure_logger, log
+from d3q.core.qlearn import QTrainer
+from d3q.core.util import DEFAULT_GAME, make_game, make_sars_buffer_dtype
+from d3q.experiencereplay.replaymemory_service import \
+    ReplayMemoryServiceController
+from d3q.sim.sim_service import SimPoolServiceController
+
+
+def cleanup():
+    import psutil
+    current_process = psutil.Process()
+    children = current_process.children(recursive=True)
+    for child in children:
+        child.kill()
+
+atexit.register(cleanup)
 
 
 def parse_args():
@@ -52,10 +66,31 @@ def parse_args():
 
 
 def main(args):
+    # Instruct python.multiprocessing to spawn processes without forking, which shares the state of libraries with the parent process (like TensorFlow's global context).
+    from multiprocessing import set_start_method
+    set_start_method('spawn')
+
+    # Instantiate the game object.
     game = make_game(args.game)
 
+    # Retrieve the gym environment's observation and action spaces.
+    sample_env = game.make_env()
+    env_observation_space = sample_env.observation_space
+    env_action_space = sample_env.action_space
+    del sample_env
+
+    sars_buffer_dtype = make_sars_buffer_dtype(env_observation_space, env_action_space)
+
+    # Create the replay memory buffer as a service running asynchronously in a separate process.
+    replaymememory_srvc = ReplayMemoryServiceController(game, sars_buffer_dtype)
+
+    # Create a pool of simulator workers as a service running asynchronously in multiple separate processes.
+    simpool_srvc = SimPoolServiceController(game, replaymememory_srvc.experience_queues)
+
+    # Instantiate the TensorFlow model used for training.
     model = game.make_model()
 
+    # Load the existing model (if applicable).
     model_loaded = False
     if not args.new_model:
         try:
@@ -67,43 +102,30 @@ def main(args):
     if not model_loaded:
         log.info(f'Creating a new model: {args.model}')
 
-    simfarm = SimFarm(game)
-    simfarm.reset_gym()
-
-    replaymemory = ReplayMemory(game)
-    qtrainer = QTrainer(game, model, replaymemory)
-
+    # Use the Q-leraning training in an endless loop.
+    qtrainer = QTrainer(game, model, replaymememory_srvc)
     iter_num = 0
     train_steps_since_last_sync = None
     random_policy_threshold = args.random_policy
 
     for iter_num, _ in enumerate(iter(bool, True), start=0):
         if iter_num == 0 or train_steps_since_last_sync >= game.NUM_ITERS_PER_CHECKPOINT:
-            simfarm.set_target_network(model, True, random_policy_threshold)
+            # TODO: Think of a better training progress reporting.
+            log.info('--------')
+
+            simpool_srvc.set_target_network(model, True, random_policy_threshold)
             train_steps_since_last_sync = 0
             random_policy_threshold *= game.RANDOM_POLICY_THRESHOLD_DECAY
 
-            # if rank == 0:
-            #     log.info(f'Saving model: {args.model}')
-            #     model.save_weights(args.model)
-            #     comm.barrier()
-            #     comm.barrier()
-            # else:
-            #     comm.barrier()
-            #     model.load_weights(args.model)
-            #     comm.barrier()
             log.info(f'Saving model: {args.model}')
             model.save_weights(args.model)
 
-        experiences = simfarm.fetch_experiences()
-        if experiences is not None:
-            replaymemory.memorize_batch(*experiences)
+        qtrainer.optimize()
+        train_steps_since_last_sync += 1
 
-        if replaymemory.size > game.FILL_REPLAYMEMORY_THRESHOLD:
-            qtrainer.optimize()
-            train_steps_since_last_sync += 1
 
 if __name__ == '__main__':
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(3)
     args = parse_args()
     configure_logger(log_level=args.log_level)
     main(args)

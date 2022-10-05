@@ -21,10 +21,19 @@
             "name": "Debug training",
             "type": "python",
             "request": "launch",
-            "module": "d3q.app.train",
+            "module": "d3q.apps.train",
             "args": [],
             "console": "integratedTerminal",
             "justMyCode": true
-        }
+        },
+        {
+            "name": "Debug preview",
+            "type": "python",
+            "request": "launch",
+            "module": "d3q.apps.preview",
+            "args": [],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
     ]
 }

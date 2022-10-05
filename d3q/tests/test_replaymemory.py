@@ -1,8 +1,20 @@
+# autopep8: on
+#
+#         .o8    .oooo.
+#        "888  .dP""Y88b
+#    .oooo888        ]8P'  .ooooo oo
+#   d88' `888      <88b.  d88' `888
+#   888   888       `88b. 888   888
+#   888   888  o.   .88P  888   888
+#   `Y8bod88P" `8bd88P'   `V8bod888
+#                               888.
+#                               8P'
+#                               "
 
 import numpy as np
 import pytest
-from d3q.logging import configure_logger
-from d3q.replaymemory2 import ReplayMemory
+from d3q.core.logging import configure_logger
+from d3q.experiencereplay.replaymemory import ReplayMemory
 
 configure_logger(log_level='debug')
 

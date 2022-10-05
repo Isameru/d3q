@@ -17,7 +17,7 @@ from bisect import bisect_left
 import numpy as np
 from numpy.random import default_rng
 
-from d3q.logging import log
+from d3q.core.logging import log
 
 DEFAULT_MAX_BRANCH_BUCKET_CAPACITY = 32
 DEFAULT_MAX_LEAF_BUCKET_CAPACITY = 128
@@ -122,33 +122,29 @@ def make_priority_tree(start_index: int,
 class ReplayMemory:
     def __init__(self,
                  capacity: int,
-                 record_size: int,
+                 sars_dtype: np.dtype,
                  initial_records_priority: float = None,
                  max_branch_bucket_capacity=DEFAULT_MAX_BRANCH_BUCKET_CAPACITY,
                  max_leaf_bucket_capacity=DEFAULT_MAX_LEAF_BUCKET_CAPACITY):
         self.capacity = capacity
-        self.record_size = record_size
         self.initial_records_priority = initial_records_priority
 
-        log.info(
-            f'Allocating buffer for prioritized experience replay of size: {self.capacity} × {self.record_size} bytes = {self.capacity * self.record_size} bytes')
-        self.record_data = np.zeros(shape=(self.capacity, self.record_size), dtype=np.ubyte)
+        log.info(f'Allocating buffer for prioritized experience replay of size: {self.capacity} × {sars_dtype.itemsize} bytes = {self.capacity * sars_dtype.itemsize} bytes')
+        self.record_data = np.zeros(shape=(self.capacity,), dtype=sars_dtype)
         self.root_bucket = make_priority_tree(0, self.capacity, None, max_branch_bucket_capacity, max_leaf_bucket_capacity)
 
         self.size = 0
         self.next_free_index = 0
 
     def memorize(self, records, priorities=None):
-        assert len(records.shape) == 2
+        assert len(records.shape) == 1 and records.dtype == self.record_data.dtype
         batch_size = records.shape[0]
-        assert records.shape[1] == self.record_size and records.dtype == np.ubyte
 
         if priorities is None:
             priorities = np.full((len(records),), self.initial_records_priority, np.float32)
-        assert (priorities is not None) and priorities > 0.0, '...'
+        assert (priorities is not None) and all(priorities > 0.0), '...'
 
-        log.info(
-            f'Memorizing {batch_size} new experiences, keeping {min(self.size + batch_size, self.capacity)} in total.')
+        log.info(f'Memorizing {batch_size} new experiences, keeping {min(self.size + batch_size, self.capacity)} in total.')
 
         if batch_size > self.capacity:
             log.warning(
@@ -156,20 +152,20 @@ class ReplayMemory:
             records = records[len(records)-self.capacity:]
             batch_size = self.capacity
 
-        def push_data(dst_start_index: int, records):
+        def push_data(dst_start_index: int, records, priorities):
             batch_size = records.shape[0]
             self.record_data[dst_start_index:dst_start_index + batch_size] = records
             self.root_bucket.update_priority(
                 dst_start_index,
                 dst_start_index+batch_size,
-                np.full((batch_size,), fill_value=priorities, dtype=np.float32))
+                priorities)
 
         free_left = self.capacity - self.next_free_index
         if batch_size <= free_left:
-            push_data(self.next_free_index, records)
+            push_data(self.next_free_index, records, priorities)
         else:
-            push_data(self.next_free_index, records[0:free_left])
-            push_data(0, records[free_left:])
+            push_data(self.next_free_index, records[0:free_left], priorities[0:free_left])
+            push_data(0, records[free_left:], priorities[free_left:])
 
         self.next_free_index += batch_size
         self.size = min(max(self.size, self.next_free_index), self.capacity)
@@ -184,3 +180,5 @@ class ReplayMemory:
     def sample_from_points(self, sample_points):
         indices = self.root_bucket.sample_indices_from_sorted_points(np.sort(sample_points))
         return np.take(self.record_data, indices, axis=0)
+
+    # TODO: Add virtual indices and means to update priorities.

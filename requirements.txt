@@ -1,3 +1,6 @@
 gym[classic_control]
+gym[box2d]
 numpy
+opencv-python
+psutil
 tensorflow

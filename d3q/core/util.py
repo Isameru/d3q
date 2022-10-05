@@ -10,17 +10,13 @@
 #                               8P'
 #                               "
 
-import os
-from functools import lru_cache
+from math import prod
 
-from d3q.logging import log
+import numpy as np
+from d3q.core.logging import log
+from gym.spaces import Space
 
 DEFAULT_GAME = 'CartPole'
-
-
-@lru_cache(1)
-def use_hpu():
-    return os.environ['TRAIN_DEVICE'].lower() == 'hpu'
 
 
 class Game:
@@ -42,6 +38,17 @@ def make_game(game_name: str):
     spec.loader.exec_module(module)
 
     game = Game()
+    game.GAME_NAME = game_name
     game.__dict__.update(module.__dict__)
 
     return game
+
+
+def make_sars_buffer_dtype(observation_space: Space, action_space: Space) -> np.dtype:
+    return np.dtype([
+        ('state', observation_space.dtype, observation_space.shape),
+        ('action', action_space.dtype, action_space.shape),
+        ('reward', np.float32, ()),
+        ('state_next', observation_space.dtype, observation_space.shape),
+        ('nonterminal', np.bool8, ()),
+    ])
