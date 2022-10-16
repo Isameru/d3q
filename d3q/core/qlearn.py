@@ -51,7 +51,7 @@ class QTrainer:
 
             for substep in range(num_substeps):
                 # Sample a random batch of experiences. It is best to have them uncorrelated.
-                observations, actions, rewards, next_observations, nonterminals = self.replaymemory_srvc.fetch_sampled_memories(as_tf_tensor_on_device='/device:CPU:0')
+                (observations, actions, rewards, next_observations, nonterminals), virt_indices = self.replaymemory_srvc.fetch_sampled_memories(as_tf_tensor_on_device='/device:CPU:0')
 
                 # Compute the best possible Q-value which can be executed from the successor state.
                 Q_next_action_values = target_model(next_observations)
@@ -67,16 +67,19 @@ class QTrainer:
                     Q_chosen_action_value = tf.gather(Q_action_values, tf.cast(actions, dtype=tf.int64), axis=1, batch_dims=1)
 
                     # Compute the loss as a criterion function between the actual Q-values and the expected (future reward discounted by time).
-                    loss = self.loss_fn(Q_chosen_action_value, expected_Q_chosen_action_value)
+                    sample_losses = self.loss_fn(tf.reshape(Q_chosen_action_value, (-1, 1)), tf.reshape(expected_Q_chosen_action_value, (-1, 1)))
+                    loss = tf.math.reduce_mean(sample_losses)
 
                     # Retrieve the gradients.
                     gradients = tape.gradient(loss, self.model.trainable_variables)
 
-                # TODO: Update sampled memory priorities based on losses.
-
                 # TODO: In case of multi-worker training, all-reduce the gradients among trainers.
 
                 self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+
+                # Update sampled memory priorities based on losses.
+                sample_priorities = tf.math.pow(sample_losses, self.game.LOSS_TO_PRIORITY_BETA)
+                self.replaymemory_srvc.update_priorities(virt_indices, sample_priorities.numpy())
 
                 total_loss += float(loss)
 

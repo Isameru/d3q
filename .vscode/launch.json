@@ -11,8 +11,6 @@
             "module": "pytest",
             "args": [
                 "-vs",
-                "-k",
-                "test_sample"
             ],
             "console": "integratedTerminal",
             "justMyCode": true

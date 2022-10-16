@@ -48,13 +48,16 @@ class ReplayMemoryServiceController:
         assert self.response_queue.get(block=True)[0] == 'ready'
 
     def fetch_sampled_memories(self, as_tf_tensor_on_device=None):
-        memories = pickle.loads(self.memory_queue.get(block=True))
+        memories, virt_indices = pickle.loads(self.memory_queue.get(block=True))
         memories = list(memories[part_name] for part_name in ['state', 'action', 'reward', 'state_next', 'nonterminal'])
 
         if as_tf_tensor_on_device is not None:
             with tf.device(as_tf_tensor_on_device):
                 memories = [tf.constant(memories_part) for memories_part in memories]
-        return memories
+        return memories, virt_indices
+
+    def update_priorities(self, sorted_virt_indices, priorities):
+        self.request_queue.put(('update_priorities', pickle.dumps((sorted_virt_indices, priorities), protocol=pickle.HIGHEST_PROTOCOL)), block=False)
 
 
 def replaymemory_serviceprocessor_fn(*args, **kwargs):
@@ -88,7 +91,7 @@ class ReplayMemoryServiceProcessor:
             try:
                 while self.request_queue.qsize() > 0:
                     request_verb, request_data = self.request_queue.get(block=False)
-                    getattr(self, request_verb)(*request_data)
+                    getattr(self, request_verb)(*pickle.loads(request_data))
             except Empty:
                 pass
 
@@ -104,9 +107,18 @@ class ReplayMemoryServiceProcessor:
                     pass
             if len(experience_records_vec) > 0:
                 experience_records = np.concatenate(experience_records_vec, axis=0)
-                priorities = np.full(shape=(experience_records.shape[0],), fill_value=1.0, dtype=np.float32)
+
+                if self.replaymemory.size > 0:
+                    new_experiences_priority = self.replaymemory.root_bucket.priority_sum / self.replaymemory.size
+                else:
+                    new_experiences_priority = 1.0
+                priorities = np.full(shape=(experience_records.shape[0],), fill_value=new_experiences_priority, dtype=np.float32)
+
                 self.replaymemory.memorize(experience_records, priorities)
 
             if self.memory_queue.qsize() < 1 and self.replaymemory.size >= self.game.FILL_REPLAYMEMORY_THRESHOLD:
-                memories = self.replaymemory.sample_random(self.game.LOCAL_BATCH_SIZE, self.rng)
-                self.memory_queue.put(pickle.dumps(memories, protocol=pickle.HIGHEST_PROTOCOL), block=False)
+                memories_and_virt_indices = self.replaymemory.sample_random(self.game.LOCAL_BATCH_SIZE, self.rng)
+                self.memory_queue.put(pickle.dumps(memories_and_virt_indices, protocol=pickle.HIGHEST_PROTOCOL), block=False)
+
+    def update_priorities(self, sorted_virt_indices, priorities):
+        self.replaymemory.update_priorities(sorted_virt_indices, priorities)

@@ -16,6 +16,7 @@ import random
 from multiprocessing import Process, Queue
 from multiprocessing.queues import Empty
 
+import gym
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import configure_logger, log
@@ -103,12 +104,19 @@ class SimServiceProcessor:
         self.has_work = False
 
         log.debug(f'Loading a gym: {self.game.GYM_NAME}')
-        self.env = self.game.make_env()
-        self.state0, _ = self.env.reset()
-        self.frame_count: int = 0
+        self.use_async_envs = (self.game.NUM_ENVS_PER_SIM > 1)
+        if self.use_async_envs:
+            self.async_envs = gym.vector.AsyncVectorEnv([self.game.make_env] * self.game.NUM_ENVS_PER_SIM)
+            self.state0_vec, _ = self.async_envs.reset()
+            self.frame_counts = [0] * self.game.NUM_ENVS_PER_SIM
+            sars_dtype = make_sars_buffer_dtype(self.async_envs.observation_space, self.async_envs.action_space)
+        else:
+            self.env = self.game.make_env()
+            self.state0, _ = self.env.reset()
+            self.frame_count: int = 0
+            sars_dtype = make_sars_buffer_dtype(self.env.observation_space, self.env.action_space)
 
         self.experience_count: int = 0
-        sars_dtype = make_sars_buffer_dtype(self.env.observation_space, self.env.action_space)
         self.sars_buffer = np.empty(shape=(self.game.EXPERIENCE_SEND_BATCH_SIZE,), dtype=sars_dtype)
 
         self.model = self.game.make_model()
@@ -126,8 +134,10 @@ class SimServiceProcessor:
                 pass
 
             if self.has_work and (self.experience_queue.qsize() < 2):
-                for _ in range(8):
-                    self.do_work_step()
+                if self.use_async_envs:
+                    self.do_work_step_with_async_envs()
+                else:
+                    self.do_work_step_with_env()
 
     def noop(self):
         pass
@@ -139,6 +149,7 @@ class SimServiceProcessor:
         for tv, mp in zip(self.model.trainable_variables, model_params):
             tv.assign(mp)
 
+        # TODO: Implement proper random policy strategy.
         #self.random_policy_threshold = random_policy_threshold
         self.random_policy_threshold = random.uniform(0.0, 1.0)
         self.has_work = start_sim
@@ -147,7 +158,7 @@ class SimServiceProcessor:
         score = evaluate(self.game, self.model)
         self.response_queue.put(('evaluation', score), block=False)
 
-    def do_work_step(self):
+    def do_work_step_with_env(self):
         if random.uniform(0.0, 1.0) < self.random_policy_threshold:
             action = self.env.action_space.sample()
         else:
@@ -156,7 +167,7 @@ class SimServiceProcessor:
 
         state1, reward, terminal, _, _ = self.game.env_step(self.env, action)
 
-        if self.frame_count > self.game.MAX_ROUND_STEPS:
+        if self.frame_count == self.game.MAX_ROUND_STEPS:
             terminal = True
 
         if terminal or (self.frame_count > self.game.NUM_SKIP_FIRST_FRAMES and random.uniform(0.0, 1.0) > self.game.SKIP_FRAME_PROB):
@@ -169,6 +180,18 @@ class SimServiceProcessor:
         else:
             self.state0 = state1
             self.frame_count += 1
+
+    def do_work_step_with_async_envs(self):
+        if random.uniform(0.0, 1.0) < self.random_policy_threshold:
+            action_vec = self.async_envs.action_space.sample()
+        else:
+            action_values_vec = self.model(self.state0_vec)
+            action_vec = tf.math.argmax(action_values_vec, axis=1).numpy()
+
+        state1_vec, reward_vec, terminal_vec, _, info = self.async_envs.step(action_vec)
+        state_terminal_vec = info.get('final_observation', None)
+
+        raise NotImplementedError('Only NUM_ENVS_PER_SIM=1 is supported')
 
     def submit_sars(self, *args):
         self.sars_buffer[self.experience_count] = args
