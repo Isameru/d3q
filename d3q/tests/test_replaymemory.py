@@ -1,4 +1,3 @@
-# autopep8: on
 #
 #         .o8    .oooo.
 #        "888  .dP""Y88b

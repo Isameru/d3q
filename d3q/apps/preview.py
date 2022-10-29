@@ -1,4 +1,3 @@
-# autopep8: off
 #
 #         .o8    .oooo.
 #        "888  .dP""Y88b
@@ -35,15 +34,15 @@ def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-l', '--log-level', dest='log_level',
-        choices=['debug', 'info', 'warning', 'error', 'critical'],
-        default=DEFAULT_LOG_LEVEL,
-        help=f'console log level (default: {DEFAULT_LOG_LEVEL})')
+                        choices=['debug', 'info', 'warning', 'error', 'critical'],
+                        default=DEFAULT_LOG_LEVEL,
+                        help=f'console log level (default: {DEFAULT_LOG_LEVEL})')
     parser.add_argument('-g', '--game', dest='game',
-        default=DEFAULT_GAME,
-        help=f'name of supported AI Gym game (environment)')
+                        default=DEFAULT_GAME,
+                        help=f'name of supported AI Gym game (environment)')
     parser.add_argument('-m', '--model', dest='model',
-        default='models\\net.tf',
-        help=f'path to model (checkpoint)')
+                        default='models\\net.tf',
+                        help=f'path to model (checkpoint)')
     return parser.parse_args()
 
 
@@ -139,7 +138,8 @@ class EnvPlayer:
             self.overlay_show_countdown -= 1
 
             text_size = cv.getTextSize(self.overlay_title, cv.FONT_HERSHEY_SIMPLEX, 1.0, 2)[0]
-            cv.putText(self.render_target, self.overlay_title, ((self.render_target.shape[0] - text_size[1]) // 2, (self.render_target.shape[1] - text_size[0]) // 2), cv.FONT_HERSHEY_SIMPLEX, 1.0, self.overlay_title_color, 2, cv.LINE_AA)
+            cv.putText(self.render_target, self.overlay_title, ((self.render_target.shape[0] - text_size[1]) // 2,
+                       (self.render_target.shape[1] - text_size[0]) // 2), cv.FONT_HERSHEY_SIMPLEX, 1.0, self.overlay_title_color, 2, cv.LINE_AA)
 
 
 def main(args):

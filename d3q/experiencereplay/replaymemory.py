@@ -1,4 +1,3 @@
-# autopep8: off
 #
 #         .o8    .oooo.
 #        "888  .dP""Y88b
@@ -207,7 +206,7 @@ class ReplayMemory:
             priorities = np.full((len(records),), self.new_records_priority, np.float32)
         assert (priorities is not None) and all(priorities > 0.0), '...'
 
-        log.info(f'Memorizing {batch_size} new experiences, keeping {min(self.size + batch_size, self.capacity)} in total.')
+        log.debug(f'Memorizing {batch_size} new experiences, keeping {min(self.size + batch_size, self.capacity)} in total.')
 
         if batch_size > self.capacity:
             log.warning(f'Trying to memorize more experiences than the capacity of the replay memory (which is {self.capacity}). Truncating the memorized batch.')
@@ -252,7 +251,8 @@ class ReplayMemory:
 
         unique_indices, unique_index_indices = np.unique(sorted_virt_indices, return_index=True)
         if len(unique_indices) != len(sorted_virt_indices):
-            priorities = np.array([np.mean(priorities[unique_index_indices[i]:(unique_index_indices[i+1] if i < len(unique_index_indices)-1 else len(priorities))]) for i in range(len(unique_indices))], dtype=np.float32)
+            priorities = np.array([np.mean(priorities[unique_index_indices[i]:(unique_index_indices[i+1] if i < len(unique_index_indices)-1 else len(priorities))])
+                                  for i in range(len(unique_indices))], dtype=np.float32)
             sorted_virt_indices = unique_indices
 
         sorted_indices = sorted_virt_indices - (self.virt_size - self.size)

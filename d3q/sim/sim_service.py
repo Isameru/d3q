@@ -1,4 +1,3 @@
-# autopep8: off
 #
 #         .o8    .oooo.
 #        "888  .dP""Y88b
@@ -20,7 +19,6 @@ import gym
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import configure_logger, log
-from d3q.core.qlearn import evaluate
 from d3q.core.util import make_game, make_sars_buffer_dtype
 
 
@@ -45,15 +43,17 @@ class SimPoolServiceController:
                            model: tf.keras.Model,
                            start_sim: bool,
                            random_policy_threshold: float):
-        log.info(f'Evaluating a new target model by running {self.game.NUM_EVAL_ROUNDS} rounds on {self.num_sims} workers, each round of at most {self.game.MAX_ROUND_STEPS} steps.')
+        log.debug(f'Evaluating a new target model by running {self.game.NUM_EVAL_ROUNDS} rounds on {self.num_sims} workers, each round of at most {self.game.MAX_ROUND_STEPS} steps.')
 
         model_params = [tv.numpy() for tv in model.trainable_variables]
         self._request_async('set_target_network', (model_params, start_sim, random_policy_threshold))
 
+        if start_sim:
+            log.debug(f'Running simulations on the target model with random_policy_threshold: {random_policy_threshold}')
+
+    def receive_evalution_scores(self):
         scores = self._get_responses('evaluation')
         log.info(f'Best Score: {max(scores)} | Average Score: {sum(scores)/len(scores)}')
-        if start_sim:
-            log.info(f'Running simulations on the target model with random_policy_threshold: {random_policy_threshold}')
         return scores
 
 
@@ -133,7 +133,7 @@ class SimServiceProcessor:
             except Empty:
                 pass
 
-            if self.has_work and (self.experience_queue.qsize() < 2):
+            if self.has_work and (self.experience_queue.qsize() < 1):
                 if self.use_async_envs:
                     self.do_work_step_with_async_envs()
                 else:
@@ -150,12 +150,11 @@ class SimServiceProcessor:
             tv.assign(mp)
 
         # TODO: Implement proper random policy strategy.
-        #self.random_policy_threshold = random_policy_threshold
-        self.random_policy_threshold = random.uniform(0.0, 1.0)
+        self.random_policy_threshold = random_policy_threshold
         self.has_work = start_sim
         self.request_queue.put(('noop', ()))
 
-        score = evaluate(self.game, self.model)
+        score = self.evaluate()
         self.response_queue.put(('evaluation', score), block=False)
 
     def do_work_step_with_env(self):
@@ -175,7 +174,6 @@ class SimServiceProcessor:
 
         if terminal:
             self.state0, _ = self.env.reset()
-            self.random_policy_threshold = random.uniform(0.0, 1.0)
             self.frame_count = 0
         else:
             self.state0 = state1
@@ -201,3 +199,28 @@ class SimServiceProcessor:
             log.debug(f'Sending a batch of {self.game.EXPERIENCE_SEND_BATCH_SIZE} experiences.')
             self.experience_queue.put(pickle.dumps(self.sars_buffer, protocol=pickle.HIGHEST_PROTOCOL), block=False)
             self.experience_count = 0
+
+    def evaluate(self):
+        score = 0.0
+
+        for round in range(self.game.NUM_EVAL_ROUNDS):
+            reward_sum = 0.0
+            state0, _ = self.env.reset()
+            for step in range(self.game.MAX_ROUND_STEPS):
+                action_values = self.model(tf.expand_dims(state0, axis=0)).numpy()
+                action = np.argmax(action_values)
+                state1, reward, terminal, info, _ = self.game.env_step(self.env, action)
+                reward_sum += reward
+                if terminal:
+                    break
+                else:
+                    state0 = state1
+            score += reward_sum
+
+        if self.game.NUM_EVAL_ROUNDS > 0:
+            score /= self.game.NUM_EVAL_ROUNDS
+
+        self.state0, _ = self.env.reset()
+        self.frame_count = 0
+
+        return score

@@ -3,4 +3,5 @@ gym[box2d]
 numpy
 opencv-python
 psutil
+tensorboard
 tensorflow

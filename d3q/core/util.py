@@ -10,9 +10,11 @@
 #                               8P'
 #                               "
 
-from math import prod
+import datetime
+import os
 
 import numpy as np
+import tensorflow as tf
 from d3q.core.logging import log
 from gym.spaces import Space
 
@@ -31,7 +33,7 @@ def make_game(game_name: str):
     module_name = f'd3q.games.{game_name}'
     file_path = f'{d3q_games_module.__path__._path[0]}/{game_name}.py'
 
-    log.info(f'Loading game module: {module_name}')
+    log.debug(f'Loading game module: {module_name}')
 
     spec = importlib.util.spec_from_file_location(module_name, file_path)
     module = importlib.util.module_from_spec(spec)
@@ -44,6 +46,25 @@ def make_game(game_name: str):
     return game
 
 
+def make_summary_writer(game: Game):
+    tb_path = os.path.join('tblog', datetime.datetime.now().strftime(f"%Y%m%d-%H%M%S_{game.GAME_NAME}"))
+    summary_writer = tf.summary.create_file_writer(tb_path)
+
+    desc = [
+        '| *Property* | *Value* |',
+        '| ---------- | ------- |',
+    ]
+
+    for x, y in game.__dict__.items():
+        if x[0].isupper():
+            desc.append(f'| {x} | {y} |')
+
+    with summary_writer.as_default(step=0):
+        tf.summary.text("Training Session Description", '\n'.join(desc))
+
+    return summary_writer
+
+
 def make_sars_buffer_dtype(observation_space: Space, action_space: Space) -> np.dtype:
     return np.dtype([
         ('state', observation_space.dtype, observation_space.shape),
@@ -52,3 +73,16 @@ def make_sars_buffer_dtype(observation_space: Space, action_space: Space) -> np.
         ('state_next', observation_space.dtype, observation_space.shape),
         ('nonterminal', np.bool8, ()),
     ])
+
+
+def cleanup_subprocesses_at_exit():
+    def cleanup():
+        import psutil
+        current_process = psutil.Process()
+        subprocesses = current_process.children(recursive=True)
+        for subprocess in subprocesses:
+            subprocess.kill()
+        current_process.kill()
+
+    import atexit
+    atexit.register(cleanup)

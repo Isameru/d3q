@@ -1,4 +1,3 @@
-# autopep8: on
 #
 #         .o8    .oooo.
 #        "888  .dP""Y88b
@@ -12,6 +11,7 @@
 #                               "
 
 import pickle
+import time
 from multiprocessing import Process, Queue
 from multiprocessing.queues import Empty
 
@@ -48,13 +48,13 @@ class ReplayMemoryServiceController:
         assert self.response_queue.get(block=True)[0] == 'ready'
 
     def fetch_sampled_memories(self, as_tf_tensor_on_device=None):
-        memories, virt_indices = pickle.loads(self.memory_queue.get(block=True))
+        memories, virt_indices, sampling_saturation = pickle.loads(self.memory_queue.get(block=True))
         memories = list(memories[part_name] for part_name in ['state', 'action', 'reward', 'state_next', 'nonterminal'])
 
         if as_tf_tensor_on_device is not None:
             with tf.device(as_tf_tensor_on_device):
-                memories = [tf.constant(memories_part) for memories_part in memories]
-        return memories, virt_indices
+                memories = [tf.convert_to_tensor(memories_part) for memories_part in memories]
+        return *memories, virt_indices, sampling_saturation
 
     def update_priorities(self, sorted_virt_indices, priorities):
         self.request_queue.put(('update_priorities', pickle.dumps((sorted_virt_indices, priorities), protocol=pickle.HIGHEST_PROTOCOL)), block=False)
@@ -83,6 +83,8 @@ class ReplayMemoryServiceProcessor:
         self.replaymemory = ReplayMemory(self.game.REPLAYMEMORY_CAPACITY, sars_dtype)
         self.rng = default_rng()
 
+        self.sampling_saturation = 0.0
+
     def run(self):
         self.response_queue.put(('ready', None))
 
@@ -95,7 +97,17 @@ class ReplayMemoryServiceProcessor:
             except Empty:
                 pass
 
-            # TODO: Add logic which chooses which is more important: memorizing new experiencing or providing memory samples to the trainer.
+            # TODO: Determine whether the sampling saturation should play a role in a logic which chooses which is more important: memorizing new experiencing or providing memory samples to the trainer.
+            action_taken = False
+
+            if self.memory_queue.qsize() < 1 and \
+                    self.replaymemory.size >= self.game.FILL_REPLAYMEMORY_THRESHOLD:
+
+                memories, virt_indices = self.replaymemory.sample_random(self.game.LOCAL_BATCH_SIZE, self.rng)
+                self.memory_queue.put(pickle.dumps((memories, virt_indices, self.sampling_saturation), protocol=pickle.HIGHEST_PROTOCOL), block=False)
+
+                self.sampling_saturation += self.game.LOCAL_BATCH_SIZE / self.replaymemory.size
+                action_taken = True
 
             # Fetch and memorize experiences.
             experience_records_vec = []
@@ -105,6 +117,7 @@ class ReplayMemoryServiceProcessor:
                         experience_records_vec.append(pickle.loads(experience_queue.get(block=False)))
                 except Empty:
                     pass
+
             if len(experience_records_vec) > 0:
                 experience_records = np.concatenate(experience_records_vec, axis=0)
 
@@ -114,11 +127,16 @@ class ReplayMemoryServiceProcessor:
                     new_experiences_priority = 1.0
                 priorities = np.full(shape=(experience_records.shape[0],), fill_value=new_experiences_priority, dtype=np.float32)
 
+                if self.game.TERMINAL_PRIORITY_FACTOR != 1.0:
+                    priorities += priorities * (self.game.TERMINAL_PRIORITY_FACTOR - 1.0) * (1 - experience_records['nonterminal'].view(np.uint8))
+
                 self.replaymemory.memorize(experience_records, priorities)
 
-            if self.memory_queue.qsize() < 1 and self.replaymemory.size >= self.game.FILL_REPLAYMEMORY_THRESHOLD:
-                memories_and_virt_indices = self.replaymemory.sample_random(self.game.LOCAL_BATCH_SIZE, self.rng)
-                self.memory_queue.put(pickle.dumps(memories_and_virt_indices, protocol=pickle.HIGHEST_PROTOCOL), block=False)
+                self.sampling_saturation *= 1.0 - self.game.LOCAL_BATCH_SIZE / self.replaymemory.size
+                action_taken = True
+
+            if not action_taken:
+                time.sleep(0.001)
 
     def update_priorities(self, sorted_virt_indices, priorities):
         self.replaymemory.update_priorities(sorted_virt_indices, priorities)

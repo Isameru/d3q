@@ -1,6 +1,7 @@
 {
     "files.exclude": {
-        "**/__pycache__": true
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
     },
     "python.formatting.autopep8Args": [
         "--max-line-length=200"
