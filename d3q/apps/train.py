@@ -102,7 +102,7 @@ def main(args):
                           args.random_policy)
 
     training_score = qtrainer.optimize_to_goal()
-    print(f'Training Score: {training_score}')
+    log.info(f'Training Score: {training_score}')
 
 
 if __name__ == '__main__':

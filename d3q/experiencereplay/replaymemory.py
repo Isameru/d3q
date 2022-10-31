@@ -17,8 +17,8 @@ import numpy as np
 from d3q.core.logging import log
 from numpy.random import default_rng
 
-DEFAULT_MAX_BRANCH_BUCKET_CAPACITY = 32
-DEFAULT_MAX_LEAF_BUCKET_CAPACITY = 128
+DEFAULT_MAX_BRANCH_BUCKET_CAPACITY = 256
+DEFAULT_MAX_LEAF_BUCKET_CAPACITY = 16*1024
 
 
 class PriorityTreeNode:
