@@ -60,8 +60,9 @@ class DQNTrainer:
 
                 self.train_steps_since_last_sync = 0
 
-                log.debug(f'Saving model: {self.save_model_path}')
-                self.model.save_weights(self.save_model_path)
+                if self.save_model_path:
+                    log.debug(f'Saving model: {self.save_model_path}')
+                    self.model.save_weights(self.save_model_path)
             else:
                 expect_eval_at_x = None
 
@@ -82,6 +83,7 @@ class DQNTrainer:
                 best_avg_score_so_far = max(best_avg_score_so_far, avg_score)
 
             if best_avg_score_so_far >= self.game.GOAL_SCORE:
+                expect_eval_at_x = max(expect_eval_at_x, 1)  # Prevent division by zero if the model is already well-trained.
                 return best_avg_score_so_far * (self.game.GAME_LIMIT_IN_SAMPLES / expect_eval_at_x)
 
             if self.num_samples_processed >= self.game.GAME_LIMIT_IN_SAMPLES:
@@ -160,6 +162,6 @@ def optimize_step(game,
 
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
-    sample_priorities = tf.math.pow(sample_losses, game.LOSS_TO_PRIORITY_BETA)
+    sample_priorities = tf.math.pow(tf.cast(sample_losses, tf.float64), game.LOSS_TO_PRIORITY_EXP_BETA)
 
     return loss, sample_priorities

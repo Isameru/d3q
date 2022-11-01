@@ -21,9 +21,8 @@ with warnings.catch_warnings():
 
 from d3q.core.dqntrainer import DQNTrainer
 from d3q.core.logging import DEFAULT_LOG_LEVEL, configure_logger, log
-from d3q.core.util import (DEFAULT_GAME, cleanup_subprocesses_at_exit,
-                           make_game, make_sars_buffer_dtype,
-                           make_summary_writer)
+from d3q.core.util import (DEFAULT_GAME, Game, cleanup_subprocesses_at_exit,
+                           make_sars_buffer_dtype, make_summary_writer)
 from d3q.experiencereplay.replaymemory_service import \
     ReplayMemoryServiceController
 from d3q.sim.sim_service import SimPoolServiceController
@@ -42,7 +41,7 @@ def parse_args():
                         default=DEFAULT_GAME,
                         help=f'name of supported AI Gym game (supported environment)')
     parser.add_argument('-m', '--model', dest='model',
-                        default='models/net.tf',
+                        default=os.path.join('models', 'net.tf'),
                         help=f'path to model (checkpoint)')
     parser.add_argument('-n', '--new-model', dest='new_model',
                         action='store_true',
@@ -55,12 +54,17 @@ def parse_args():
 
 
 def main(args):
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(3)
+
+    cleanup_subprocesses_at_exit()
+    configure_logger(log_level=args.log_level)
+
     # Instruct python.multiprocessing to spawn processes without forking, which shares the state of libraries with the parent process (like TensorFlow's global context).
     from multiprocessing import set_start_method
     set_start_method('spawn')
 
     # Instantiate the game object.
-    game = make_game(args.game)
+    game = Game(args.game)
 
     # Retrieve the gym environment's observation and action spaces.
     sample_env = game.make_env()
@@ -106,8 +110,5 @@ def main(args):
 
 
 if __name__ == '__main__':
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(3)
     args = parse_args()
-    cleanup_subprocesses_at_exit()
-    configure_logger(log_level=args.log_level)
     main(args)

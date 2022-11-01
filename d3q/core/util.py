@@ -22,28 +22,32 @@ DEFAULT_GAME = 'CartPole'
 
 
 class Game:
-    pass
+    def __init__(self, game_name):
+        import importlib
 
+        import d3q.games as d3q_games_module
 
-def make_game(game_name: str):
-    import importlib
+        self.MODULE_NAME = f'd3q.games.{game_name}'
+        self.MODULE_FILE_PATH = f'{d3q_games_module.__path__._path[0]}/{game_name}.py'
 
-    import d3q.games as d3q_games_module
+        log.debug(f'Loading game module: {self.MODULE_NAME}')
+        spec = importlib.util.spec_from_file_location(self.MODULE_NAME, self.MODULE_FILE_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
-    module_name = f'd3q.games.{game_name}'
-    file_path = f'{d3q_games_module.__path__._path[0]}/{game_name}.py'
+        # Set default values.
+        self.GAME_NAME = game_name
+        self.NUM_ENVS_PER_SIM = 1
 
-    log.debug(f'Loading game module: {module_name}')
+        # Override values with the ones from the module.
+        self.__dict__.update(module.__dict__)
 
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    def make_env(self, *args, **kwargs):
+        import gym
+        return gym.make(self.GYM_NAME, *args, **kwargs)
 
-    game = Game()
-    game.GAME_NAME = game_name
-    game.__dict__.update(module.__dict__)
-
-    return game
+    def preprocess_state(self, state):
+        return state
 
 
 def make_summary_writer(game: Game):

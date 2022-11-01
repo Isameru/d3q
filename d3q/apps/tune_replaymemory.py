@@ -40,7 +40,7 @@ def benchmark_replaymemory(config):
                           max_branch_bucket_capacity=config['max_branch_bucket_capacity'])
 
         batch = np.arange(0, BATCH_SIZE, 1, dtype=np.int32)
-        priorities = np.full(shape=(BATCH_SIZE,), fill_value=1.0, dtype=np.float32)
+        priorities = np.full(shape=(BATCH_SIZE,), fill_value=1.0, dtype=np.float64)
 
         start_time = time.time()
         for step in range(NUM_STEPS):

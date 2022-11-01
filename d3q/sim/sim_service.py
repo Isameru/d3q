@@ -19,7 +19,7 @@ import gym
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import configure_logger, log
-from d3q.core.util import make_game, make_sars_buffer_dtype
+from d3q.core.util import Game, make_sars_buffer_dtype
 
 
 class SimPoolServiceController:
@@ -100,10 +100,10 @@ class SimServiceProcessor:
         self.response_queue = response_queue
         self.experience_queue = experience_queue
 
-        self.game = make_game(game_name)
+        self.game = Game(game_name)
         self.has_work = False
 
-        log.debug(f'Loading a gym: {self.game.GYM_NAME}')
+        log.debug(f'Loading gym: {self.game.GYM_NAME}')
         self.use_async_envs = (self.game.NUM_ENVS_PER_SIM > 1)
         if self.use_async_envs:
             self.async_envs = gym.vector.AsyncVectorEnv([self.game.make_env] * self.game.NUM_ENVS_PER_SIM)
@@ -113,6 +113,7 @@ class SimServiceProcessor:
         else:
             self.env = self.game.make_env()
             self.state0, _ = self.env.reset()
+            self.state0 = self.game.preprocess_state(self.state0)
             self.frame_count: int = 0
             sars_dtype = make_sars_buffer_dtype(self.env.observation_space, self.env.action_space)
 
@@ -164,7 +165,7 @@ class SimServiceProcessor:
             action_values = self.model(tf.expand_dims(self.state0, axis=0))
             action = tf.math.argmax(action_values, axis=1).numpy().item()
 
-        state1, reward, terminal, _, _ = self.game.env_step(self.env, action)
+        state1, reward, terminal, _, _ = self.env.step(action)
 
         if self.frame_count == self.game.MAX_ROUND_STEPS:
             terminal = True
@@ -174,6 +175,7 @@ class SimServiceProcessor:
 
         if terminal:
             self.state0, _ = self.env.reset()
+            self.state0 = self.game.preprocess_state(self.state0)
             self.frame_count = 0
         else:
             self.state0 = state1
@@ -206,10 +208,11 @@ class SimServiceProcessor:
         for round in range(self.game.NUM_EVAL_ROUNDS):
             reward_sum = 0.0
             state0, _ = self.env.reset()
+            state0 = self.game.preprocess_state(state0)
             for step in range(self.game.MAX_ROUND_STEPS):
                 action_values = self.model(tf.expand_dims(state0, axis=0)).numpy()
                 action = np.argmax(action_values)
-                state1, reward, terminal, info, _ = self.game.env_step(self.env, action)
+                state1, reward, terminal, info, _ = self.env.step(action)
                 reward_sum += reward
                 if terminal:
                     break
@@ -221,6 +224,7 @@ class SimServiceProcessor:
             score /= self.game.NUM_EVAL_ROUNDS
 
         self.state0, _ = self.env.reset()
+        self.state0 = self.game.preprocess_state(self.state0)
         self.frame_count = 0
 
         return score

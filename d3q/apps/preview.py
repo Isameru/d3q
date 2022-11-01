@@ -22,7 +22,7 @@ import cv2 as cv
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import DEFAULT_LOG_LEVEL, configure_logger, log
-from d3q.core.util import DEFAULT_GAME, make_game
+from d3q.core.util import DEFAULT_GAME, Game
 
 MODEL_CHECK_INTERVAL_SEC = 2.5
 OVERLAY_SHOW_FOR_STEPS = 50
@@ -41,7 +41,7 @@ def parse_args():
                         default=DEFAULT_GAME,
                         help=f'name of supported AI Gym game (environment)')
     parser.add_argument('-m', '--model', dest='model',
-                        default='models\\net.tf',
+                        default=os.path.join('models', 'net.tf'),
                         help=f'path to model (checkpoint)')
     return parser.parse_args()
 
@@ -99,6 +99,7 @@ class EnvPlayer:
         if self.overlay_show_countdown == 0:
             if self.state0 is None:
                 self.state0, _ = self.env.reset()
+                self.state0 = self.game.preprocess_state(self.state0)
                 self.iter_num = 0
                 self.score = 0.0
             else:
@@ -112,7 +113,7 @@ class EnvPlayer:
                 else:
                     action = self.env.action_space.sample()
 
-                state1, reward, terminal, _, _ = self.game.env_step(self.env, action)
+                state1, reward, terminal, _, _ = self.env.step(action)
 
                 self.iter_num += 1
                 self.score += reward
@@ -143,7 +144,12 @@ class EnvPlayer:
 
 
 def main(args):
-    game = make_game(args.game)
+    configure_logger(log_level=args.log_level)
+
+    # Instantiate the game object.
+    game = Game(args.game)
+
+    # Define the model provider.
     model_source = ModelSource(game, args.model)
 
     # Make multiple environments based on the game's desired preview tiling.
@@ -178,5 +184,4 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
-    configure_logger(log_level=args.log_level)
     main(args)

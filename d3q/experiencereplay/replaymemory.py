@@ -173,9 +173,9 @@ def make_priority_tree(start_index: int,
                     max_branch_bucket_capacity,
                     max_leaf_bucket_capacity)
                 for branch_index in range(branch_count)]
-            bucket.cumulative_sums = np.zeros((len(bucket.children),), dtype=np.float32)
+            bucket.cumulative_sums = np.zeros((len(bucket.children),), dtype=np.float64)
     if bucket.cumulative_sums is None:
-        bucket.cumulative_sums = np.zeros((end_index-start_index,), dtype=np.float32)
+        bucket.cumulative_sums = np.zeros((end_index-start_index,), dtype=np.float64)
     bucket._verify()
     return bucket
 
@@ -203,7 +203,7 @@ class ReplayMemory:
         batch_size = records.shape[0]
 
         if priorities is None:
-            priorities = np.full((len(records),), self.new_records_priority, np.float32)
+            priorities = np.full((len(records),), self.new_records_priority, np.float64)
         assert (priorities is not None) and all(priorities > 0.0), '...'
 
         log.debug(f'Memorizing {batch_size} new experiences, keeping {min(self.size + batch_size, self.capacity)} in total.')
@@ -252,7 +252,7 @@ class ReplayMemory:
         unique_indices, unique_index_indices = np.unique(sorted_virt_indices, return_index=True)
         if len(unique_indices) != len(sorted_virt_indices):
             priorities = np.array([np.mean(priorities[unique_index_indices[i]:(unique_index_indices[i+1] if i < len(unique_index_indices)-1 else len(priorities))])
-                                  for i in range(len(unique_indices))], dtype=np.float32)
+                                  for i in range(len(unique_indices))], dtype=np.float64)
             sorted_virt_indices = unique_indices
 
         sorted_indices = sorted_virt_indices - (self.virt_size - self.size)

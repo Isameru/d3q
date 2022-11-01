@@ -18,7 +18,7 @@ from multiprocessing.queues import Empty
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import configure_logger
-from d3q.core.util import make_game
+from d3q.core.util import Game
 from d3q.experiencereplay.replaymemory import ReplayMemory
 from numpy.random import default_rng
 
@@ -74,7 +74,7 @@ class ReplayMemoryServiceProcessor:
                  experience_queues,
                  memory_queue):
         configure_logger(logger_name='repmem')
-        self.game = make_game(game_name)
+        self.game = Game(game_name)
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.experience_queues = experience_queues
@@ -125,7 +125,7 @@ class ReplayMemoryServiceProcessor:
                     new_experiences_priority = self.replaymemory.root_bucket.priority_sum / self.replaymemory.size
                 else:
                     new_experiences_priority = 1.0
-                priorities = np.full(shape=(experience_records.shape[0],), fill_value=new_experiences_priority, dtype=np.float32)
+                priorities = np.full(shape=(experience_records.shape[0],), fill_value=new_experiences_priority, dtype=np.float64)
 
                 if self.game.TERMINAL_PRIORITY_FACTOR != 1.0:
                     priorities += priorities * (self.game.TERMINAL_PRIORITY_FACTOR - 1.0) * (1 - experience_records['nonterminal'].view(np.uint8))
