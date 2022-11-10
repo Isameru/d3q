@@ -211,6 +211,7 @@ class ReplayMemory:
         if batch_size > self.capacity:
             log.warning(f'Trying to memorize more experiences than the capacity of the replay memory (which is {self.capacity}). Truncating the memorized batch.')
             records = records[len(records)-self.capacity:]
+            priorities = priorities[len(priorities)-self.capacity:]
             batch_size = self.capacity
 
         def push_data(dst_start_index: int, records, priorities):

@@ -19,7 +19,7 @@ import gym
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import configure_logger, log
-from d3q.core.util import Game, make_sars_buffer_dtype
+from d3q.core.util import Game, make_game, make_sars_buffer_dtype
 
 
 class SimPoolServiceController:
@@ -27,7 +27,7 @@ class SimPoolServiceController:
         self.game = game
         self.num_sims = game.NUM_SIMS
         assert len(experience_queues) == self.num_sims
-        self.controllers = [SimServiceController(f'sim:{i}', game.GAME_NAME, experience_queues[i]) for i in range(self.num_sims)]
+        self.controllers = [SimServiceController(f'sim:{i}', game, experience_queues[i]) for i in range(self.num_sims)]
         for controller in self.controllers:
             controller.expect_ready()
         log.info('All simulators ready.')
@@ -56,14 +56,19 @@ class SimPoolServiceController:
         log.info(f'Best Score: {max(scores)} | Average Score: {sum(scores)/len(scores)}')
         return scores
 
+    def close(self):
+        self._request_async('close', ())
+        for controller in self.controllers:
+            controller.wait_for_closure()
+
 
 class SimServiceController:
-    def __init__(self, name: str, game_name: str, experience_queue: Queue):
+    def __init__(self, name: str, game: Game, experience_queue: Queue):
         self.request_queue = Queue()
         self.response_queue = Queue()
         self.process = Process(target=sim_serviceprocessor_fn,
                                args=(name,
-                                     game_name,
+                                     game.config,
                                      self.request_queue,
                                      self.response_queue,
                                      experience_queue))
@@ -80,6 +85,14 @@ class SimServiceController:
     def request_async(self, verb, data):
         self.request_queue.put((verb, data), block=False)
 
+    def wait_for_closure(self):
+        try:
+            self.process.join(timeout=3.0)
+        except TimeoutError:
+            self.process.terminate()
+        self.request_queue.close()
+        self.response_queue.close()
+
 
 def sim_serviceprocessor_fn(*args, **kwargs):
     processor = SimServiceProcessor(*args, **kwargs)
@@ -89,7 +102,7 @@ def sim_serviceprocessor_fn(*args, **kwargs):
 class SimServiceProcessor:
     def __init__(self,
                  worker_name: str,
-                 game_name: str,
+                 game_config: Game,
                  request_queue: Queue,
                  response_queue: Queue,
                  experience_queue: Queue):
@@ -100,7 +113,10 @@ class SimServiceProcessor:
         self.response_queue = response_queue
         self.experience_queue = experience_queue
 
-        self.game = Game(game_name)
+        self.game = make_game(game_config['GAME_NAME'])
+        self.game.update_from_config(game_config)
+
+        self.should_exit = False
         self.has_work = False
 
         log.debug(f'Loading gym: {self.game.GYM_NAME}')
@@ -131,6 +147,8 @@ class SimServiceProcessor:
                 while self.request_queue.qsize() > 0:
                     request_verb, request_data = self.request_queue.get(block=not self.has_work)
                     getattr(self, request_verb)(*request_data)
+                    if self.should_exit:
+                        return
             except Empty:
                 pass
 
@@ -143,15 +161,27 @@ class SimServiceProcessor:
     def noop(self):
         pass
 
+    def close(self):
+        self.request_queue.close()
+        self.response_queue.close()
+        self.experience_queue.close()
+        self.should_exit = True
+
     def set_target_network(self,
                            model_params,
                            start_sim: bool,
-                           random_policy_threshold: float):
+                           random_policy_threshold):
         for tv, mp in zip(self.model.trainable_variables, model_params):
             tv.assign(mp)
 
         # TODO: Implement proper random policy strategy.
-        self.random_policy_threshold = random_policy_threshold
+        if isinstance(random_policy_threshold, float):
+            self.random_policy_threshold = random_policy_threshold
+        elif (isinstance(random_policy_threshold, tuple) or isinstance(random_policy_threshold, list)) and len(random_policy_threshold) == 2:
+            self.random_policy_threshold = random.uniform(*random_policy_threshold)
+        else:
+            assert False, f'random_policy_threshold may be a float or a pair of floats (a range), but is: {random_policy_threshold}'
+
         self.has_work = start_sim
         self.request_queue.put(('noop', ()))
 

@@ -18,7 +18,7 @@ from multiprocessing.queues import Empty
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import configure_logger
-from d3q.core.util import Game
+from d3q.core.util import make_game
 from d3q.experiencereplay.replaymemory import ReplayMemory
 from numpy.random import default_rng
 
@@ -35,7 +35,7 @@ class ReplayMemoryServiceController:
         self.memory_queue = Queue()
 
         self.process = Process(target=replaymemory_serviceprocessor_fn,
-                               args=(game.GAME_NAME,
+                               args=(game.config,
                                      sars_dtype,
                                      self.request_queue,
                                      self.response_queue,
@@ -59,6 +59,18 @@ class ReplayMemoryServiceController:
     def update_priorities(self, sorted_virt_indices, priorities):
         self.request_queue.put(('update_priorities', pickle.dumps((sorted_virt_indices, priorities), protocol=pickle.HIGHEST_PROTOCOL)), block=False)
 
+    def close(self):
+        self.request_queue.put(('close', pickle.dumps((), protocol=pickle.HIGHEST_PROTOCOL)))
+        try:
+            self.process.join(timeout=3.0)
+        except TimeoutError:
+            self.process.terminate()
+        self.request_queue.close()
+        self.response_queue.close()
+        for queue in self.experience_queues:
+            queue.close()
+        self.memory_queue.close()
+
 
 def replaymemory_serviceprocessor_fn(*args, **kwargs):
     processor = ReplayMemoryServiceProcessor(*args, **kwargs)
@@ -67,18 +79,23 @@ def replaymemory_serviceprocessor_fn(*args, **kwargs):
 
 class ReplayMemoryServiceProcessor:
     def __init__(self,
-                 game_name,
+                 game_config,
                  sars_dtype,
                  request_queue,
                  response_queue,
                  experience_queues,
                  memory_queue):
         configure_logger(logger_name='repmem')
-        self.game = Game(game_name)
+
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.experience_queues = experience_queues
         self.memory_queue = memory_queue
+
+        self.game = make_game(game_config['GAME_NAME'])
+        self.game.update_from_config(game_config)
+
+        self.should_exit = False
 
         self.replaymemory = ReplayMemory(self.game.REPLAYMEMORY_CAPACITY, sars_dtype)
         self.rng = default_rng()
@@ -94,6 +111,8 @@ class ReplayMemoryServiceProcessor:
                 while self.request_queue.qsize() > 0:
                     request_verb, request_data = self.request_queue.get(block=False)
                     getattr(self, request_verb)(*pickle.loads(request_data))
+                    if self.should_exit:
+                        return
             except Empty:
                 pass
 
@@ -101,7 +120,7 @@ class ReplayMemoryServiceProcessor:
             action_taken = False
 
             if self.memory_queue.qsize() < 1 and \
-                    self.replaymemory.size >= self.game.FILL_REPLAYMEMORY_THRESHOLD:
+                    self.replaymemory.size >= min(self.game.FILL_REPLAYMEMORY_THRESHOLD, self.replaymemory.capacity):
 
                 memories, virt_indices = self.replaymemory.sample_random(self.game.LOCAL_BATCH_SIZE, self.rng)
                 self.memory_queue.put(pickle.dumps((memories, virt_indices, self.sampling_saturation), protocol=pickle.HIGHEST_PROTOCOL), block=False)
@@ -140,3 +159,11 @@ class ReplayMemoryServiceProcessor:
 
     def update_priorities(self, sorted_virt_indices, priorities):
         self.replaymemory.update_priorities(sorted_virt_indices, priorities)
+
+    def close(self):
+        self.request_queue.close()
+        self.response_queue.close()
+        for queue in self.experience_queues:
+            queue.close()
+        self.memory_queue.close()
+        self.should_exit = True

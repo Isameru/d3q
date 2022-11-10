@@ -16,15 +16,18 @@ import traceback
 import warnings
 
 from d3q.core.logging import configure_logger, log
-from d3q.core.util import DEFAULT_GAME, Game
+from d3q.core.util import DEFAULT_GAME, make_game
 from ray import air, tune
 from ray.tune.search import ConcurrencyLimiter
 from ray.tune.search.hyperopt import HyperOptSearch
 
-NUM_TRIALS = 128
+NUM_TRIALS = 1024
 
 
 def benchmark_training(config):
+    replaymememory_srvc = None
+    simpool_srvc = None
+
     try:
         with warnings.catch_warnings():
             try:
@@ -33,14 +36,12 @@ def benchmark_training(config):
                 pass
 
         from d3q.core.dqntrainer import DQNTrainer
-        from d3q.core.util import (cleanup_subprocesses_at_exit,
-                                   make_sars_buffer_dtype, make_summary_writer)
+        from d3q.core.util import make_sars_buffer_dtype, make_summary_writer
         from d3q.experiencereplay.replaymemory_service import \
             ReplayMemoryServiceController
         from d3q.sim.sim_service import SimPoolServiceController
 
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(3)
-        cleanup_subprocesses_at_exit()
         configure_logger(log_level='info')
 
         # Instruct python.multiprocessing to spawn processes without forking, which shares the state of libraries with the parent process (like TensorFlow's global context).
@@ -48,8 +49,8 @@ def benchmark_training(config):
         set_start_method('spawn')
 
         # Instantiate the game object and apply the config.
-        game = Game(args.game)
-        game.__dict__.update(config)
+        game = make_game(args.game)
+        game.update_from_config(config)
 
         # Retrieve the gym environment's observation and action spaces.
         sample_env = game.make_env()
@@ -68,7 +69,6 @@ def benchmark_training(config):
         model = game.make_model()
 
         summary_writer = make_summary_writer(game)
-
         # Use the Q-learning algorithm in an endless loop.
         qtrainer = DQNTrainer(game,
                               model,
@@ -85,6 +85,12 @@ def benchmark_training(config):
         print(f'error: While benchmarking variant {config}: {str(err)}')
         traceback.print_exception(*sys.exc_info())
         tune.report(score=0.0)
+
+    finally:
+        if simpool_srvc is not None:
+            simpool_srvc.close()
+        if replaymememory_srvc is not None:
+            replaymememory_srvc.close()
 
 
 def parse_args():
@@ -108,7 +114,7 @@ def main(args):
     configure_logger(log_level='info')
 
     # Instantiate the game object to retrieve the tune search space.
-    game = Game(args.game)
+    game = make_game(args.game)
     tune_space = game.make_tune_space()
 
     num_trials = NUM_TRIALS
@@ -121,7 +127,7 @@ def main(args):
     raytune_path = os.path.abspath(os.path.join('ray_results', args.name))
     if os.path.isdir(raytune_path):
         log.info(f'Restoring tuner from: {raytune_path}')
-        tuner = tune.Tuner.restore(raytune_path)
+        tuner = tune.Tuner.restore(raytune_path, resume_unfinished=True, restart_errored=True)
     else:
         log.info(f'Starting a new tuner: {raytune_path}')
         tuner = tune.Tuner(benchmark_training,

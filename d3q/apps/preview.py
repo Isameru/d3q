@@ -22,7 +22,7 @@ import cv2 as cv
 import numpy as np
 import tensorflow as tf
 from d3q.core.logging import DEFAULT_LOG_LEVEL, configure_logger, log
-from d3q.core.util import DEFAULT_GAME, Game
+from d3q.core.util import DEFAULT_GAME, make_game
 
 MODEL_CHECK_INTERVAL_SEC = 2.5
 OVERLAY_SHOW_FOR_STEPS = 50
@@ -147,7 +147,7 @@ def main(args):
     configure_logger(log_level=args.log_level)
 
     # Instantiate the game object.
-    game = Game(args.game)
+    game = make_game(args.game)
 
     # Define the model provider.
     model_source = ModelSource(game, args.model)

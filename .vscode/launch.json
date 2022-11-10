@@ -20,7 +20,10 @@
             "type": "python",
             "request": "launch",
             "module": "d3q.apps.train",
-            "args": [],
+            "args": [
+                "-l",
+                "debug"
+            ],
             "console": "integratedTerminal",
             "justMyCode": true
         },

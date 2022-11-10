@@ -23,24 +23,17 @@ DEFAULT_GAME = 'CartPole'
 
 class Game:
     def __init__(self, game_name):
-        import importlib
-
-        import d3q.games as d3q_games_module
-
-        self.MODULE_NAME = f'd3q.games.{game_name}'
-        self.MODULE_FILE_PATH = f'{d3q_games_module.__path__._path[0]}/{game_name}.py'
-
-        log.debug(f'Loading game module: {self.MODULE_NAME}')
-        spec = importlib.util.spec_from_file_location(self.MODULE_NAME, self.MODULE_FILE_PATH)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        self.GAME_NAME = game_name
 
         # Set default values.
-        self.GAME_NAME = game_name
         self.NUM_ENVS_PER_SIM = 1
 
-        # Override values with the ones from the module.
-        self.__dict__.update(module.__dict__)
+    @property
+    def config(self):
+        return self.__dict__
+
+    def update_from_config(self, game_config):
+        self.__dict__.update(game_config)
 
     def make_env(self, *args, **kwargs):
         import gym
@@ -48,6 +41,23 @@ class Game:
 
     def preprocess_state(self, state):
         return state
+
+
+def make_game(game_name: str):
+    import importlib
+
+    import d3q.games as d3q_games_module
+
+    module_name = f'd3q.games.{game_name}'
+    module_file_path = f'{d3q_games_module.__path__._path[0]}/{game_name}.py'
+
+    log.debug(f'Loading game module: {module_name}')
+    spec = importlib.util.spec_from_file_location(module_name, module_file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    # Set default values.
+    return module.__dict__[f'{game_name}Game']()
 
 
 def make_summary_writer(game: Game):

@@ -21,8 +21,8 @@ with warnings.catch_warnings():
 
 from d3q.core.dqntrainer import DQNTrainer
 from d3q.core.logging import DEFAULT_LOG_LEVEL, configure_logger, log
-from d3q.core.util import (DEFAULT_GAME, Game, cleanup_subprocesses_at_exit,
-                           make_sars_buffer_dtype, make_summary_writer)
+from d3q.core.util import (DEFAULT_GAME, make_game, make_sars_buffer_dtype,
+                           make_summary_writer)
 from d3q.experiencereplay.replaymemory_service import \
     ReplayMemoryServiceController
 from d3q.sim.sim_service import SimPoolServiceController
@@ -54,59 +54,68 @@ def parse_args():
 
 
 def main(args):
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(3)
+    replaymememory_srvc = None
+    simpool_srvc = None
 
-    cleanup_subprocesses_at_exit()
-    configure_logger(log_level=args.log_level)
+    try:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = str(3)
 
-    # Instruct python.multiprocessing to spawn processes without forking, which shares the state of libraries with the parent process (like TensorFlow's global context).
-    from multiprocessing import set_start_method
-    set_start_method('spawn')
+        configure_logger(log_level=args.log_level)
 
-    # Instantiate the game object.
-    game = Game(args.game)
+        # Instruct python.multiprocessing to spawn processes without forking, which shares the state of libraries with the parent process (like TensorFlow's global context).
+        from multiprocessing import set_start_method
+        set_start_method('spawn')
 
-    # Retrieve the gym environment's observation and action spaces.
-    sample_env = game.make_env()
-    env_observation_space = sample_env.observation_space
-    env_action_space = sample_env.action_space
-    del sample_env
+        # Instantiate the game object.
+        game = make_game(args.game)
 
-    # Create the replay memory buffer as a service running asynchronously in a separate process.
-    sars_buffer_dtype = make_sars_buffer_dtype(env_observation_space, env_action_space)
-    replaymememory_srvc = ReplayMemoryServiceController(game, sars_buffer_dtype)
+        # Retrieve the gym environment's observation and action spaces.
+        sample_env = game.make_env()
+        env_observation_space = sample_env.observation_space
+        env_action_space = sample_env.action_space
+        del sample_env
 
-    # Create a pool of simulator workers as a service running asynchronously in multiple separate processes.
-    simpool_srvc = SimPoolServiceController(game, replaymememory_srvc.experience_queues)
+        # Create the replay memory buffer as a service running asynchronously in a separate process.
+        sars_buffer_dtype = make_sars_buffer_dtype(env_observation_space, env_action_space)
+        replaymememory_srvc = ReplayMemoryServiceController(game, sars_buffer_dtype)
 
-    # Instantiate the TensorFlow model used for training.
-    model = game.make_model()
+        # Create a pool of simulator workers as a service running asynchronously in multiple separate processes.
+        simpool_srvc = SimPoolServiceController(game, replaymememory_srvc.experience_queues)
 
-    # Load the existing model (if applicable).
-    model_loaded = False
-    if not args.new_model:
-        try:
-            model.load_weights(args.model)
-            log.info(f'Model loaded: {args.model}')
-            model_loaded = True
-        except Exception:
-            pass
-    if not model_loaded:
-        log.info(f'Creating a new model: {args.model}')
+        # Instantiate the TensorFlow model used for training.
+        model = game.make_model()
 
-    summary_writer = make_summary_writer(game)
+        # Load the existing model (if applicable).
+        model_loaded = False
+        if not args.new_model:
+            try:
+                model.load_weights(args.model)
+                log.info(f'Model loaded: {args.model}')
+                model_loaded = True
+            except Exception:
+                pass
+        if not model_loaded:
+            log.info(f'Creating a new model: {args.model}')
 
-    # Use the Q-learning algorithm in an endless loop.
-    qtrainer = DQNTrainer(game,
-                          model,
-                          args.model,
-                          replaymememory_srvc,
-                          simpool_srvc,
-                          summary_writer,
-                          args.random_policy)
+        summary_writer = make_summary_writer(game)
 
-    training_score = qtrainer.optimize_to_goal()
-    log.info(f'Training Score: {training_score}')
+        # Use the Q-learning algorithm in an endless loop.
+        qtrainer = DQNTrainer(game,
+                              model,
+                              args.model,
+                              replaymememory_srvc,
+                              simpool_srvc,
+                              summary_writer,
+                              args.random_policy)
+
+        training_score = qtrainer.optimize_to_goal()
+        log.info(f'Training Score: {training_score}')
+
+    finally:
+        if simpool_srvc is not None:
+            simpool_srvc.close()
+        if replaymememory_srvc is not None:
+            replaymememory_srvc.close()
 
 
 if __name__ == '__main__':

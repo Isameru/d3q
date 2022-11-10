@@ -4,6 +4,6 @@
         "**/.pytest_cache": true,
     },
     "python.formatting.autopep8Args": [
-        "--max-line-length=200"
+        "--max-line-length=240"
     ]
 }
