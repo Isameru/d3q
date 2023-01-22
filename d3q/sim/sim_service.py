@@ -240,7 +240,7 @@ class SimServiceProcessor:
             state0, _ = self.env.reset()
             state0 = self.game.preprocess_state(state0)
             for step in range(self.game.MAX_ROUND_STEPS):
-                action_values = self.model(tf.expand_dims(state0, axis=0)).numpy()
+                action_values = self.model(tf.expand_dims(state0, axis=0), training=False).numpy()
                 action = np.argmax(action_values)
                 state1, reward, terminal, info, _ = self.env.step(action)
                 reward_sum += reward

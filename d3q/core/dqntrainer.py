@@ -176,7 +176,7 @@ def optimize_step(game,
     """
 
     # Compute the best possible Q-value which can be executed from the successor state.
-    Q_next_action_values = target_model(next_observations)
+    Q_next_action_values = target_model(next_observations, training=False)
     Q_next_best_actions = tf.math.argmax(Q_next_action_values, axis=1)
     Q_next_best_action_values = tf.gather(Q_next_action_values, Q_next_best_actions, axis=1, batch_dims=1)
 
@@ -185,7 +185,7 @@ def optimize_step(game,
 
     with tf.GradientTape() as tape:
         # Compute the Q-value of the actually executed action (so called Pi, or "policy" function value) on the predecessor state.
-        Q_action_values = model(observations)
+        Q_action_values = model(observations, training=True)
         Q_chosen_action_value = tf.gather(Q_action_values, tf.cast(actions, dtype=tf.int64), axis=1, batch_dims=1)
 
         # Compute the loss as a criterion function between the actual Q-values and the expected (future reward discounted by time).

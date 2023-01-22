@@ -108,7 +108,7 @@ class EnvPlayer:
                     self.model_ver_text = str(model_ver) if self.model is not None else 'RANDOM'
 
                 if self.model is not None:
-                    action_values = self.model(tf.expand_dims(self.state0, axis=0)).numpy()
+                    action_values = self.model(tf.expand_dims(self.state0, axis=0), training=False).numpy()
                     action = np.argmax(action_values)
                 else:
                     action = self.env.action_space.sample()
